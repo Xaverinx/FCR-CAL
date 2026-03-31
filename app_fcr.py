@@ -5,9 +5,8 @@ import plotly.express as px
 # ==========================================
 # CONFIGURAÇÃO DE PÁGINA E CSS PREMIUM
 # ==========================================
-st.set_page_config(page_title="Dashboard de FCR", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Dashboard de FCR e ERP", layout="wide", initial_sidebar_state="expanded")
 
-# CSS customizado para os Cards de Métricas (Efeito Hover, Sombras, Bordas)
 st.markdown("""
     <style>
     div[data-testid="metric-container"] {
@@ -32,7 +31,6 @@ st.markdown("""
         font-weight: 700 !important;
         color: #0f172a !important;
     }
-    /* Estilização dos separadores */
     hr {
         margin-top: 2rem;
         margin-bottom: 2rem;
@@ -42,8 +40,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🎯 Dashboard Operacional: Cálculo de FCR")
-st.markdown("Acompanhamento de First Contact Resolution e Reincidências da Operação")
+st.title("🎯 Dashboard Operacional: FCR e Auditoria ERA")
+st.markdown("Acompanhamento de First Contact Resolution e Aderência de Registros (Voalle vs ERA)")
 st.markdown("---")
 
 # --- LISTA FIXA DAS EQUIPES DE FCR ---
@@ -59,7 +57,7 @@ EQUIPES_FCR = [
 # BARRA LATERAL (Filtros)
 # ==========================================
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/2936/2936630.png", width=60) # Ícone de dashboard
+    st.image("https://cdn-icons-png.flaticon.com/512/2936/2936630.png", width=60)
     st.header("Parâmetros do Relatório")
     
     arquivo_carregado = st.file_uploader("📂 Importar Base de Dados (.csv)")
@@ -72,7 +70,6 @@ with st.sidebar:
                 arquivo_carregado.seek(0)
                 df = pd.read_csv(arquivo_carregado, sep=';', encoding='latin1')
             
-            # Limpeza
             df['Tipo de Solicitação'] = df['Tipo de Solicitação'].astype(str).str.strip()
             df['Solicitante'] = df['Solicitante'].astype(str).str.strip()
             
@@ -80,7 +77,6 @@ with st.sidebar:
             if coluna_atendente in df.columns:
                 df[coluna_atendente] = df[coluna_atendente].astype(str).str.strip()
             
-            # Filtro de Datas
             if 'Data da Abertura' in df.columns:
                 df['Data da Abertura'] = df['Data da Abertura'].astype(str).str.strip()
                 df['Data da Abertura'] = pd.to_datetime(df['Data da Abertura'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
@@ -130,11 +126,15 @@ if arquivo_carregado is not None and 'equipes_selecionadas' in locals():
     if df.empty:
         st.warning("⚠️ Não há registros para os filtros selecionados.")
     else:
-        aba_time, aba_individual = st.tabs(["📊 VISÃO GERAL DO TIME", "👤 PERFORMANCE INDIVIDUAL"])
+        aba_time, aba_individual, aba_voalle = st.tabs([
+            "📊 VISÃO GERAL (FCR)", 
+            "👤 PERFORMANCE INDIVIDUAL", 
+            "📝 REGISTROS: VOALLE vs ERA"
+        ])
         
         df_fcr_time = df[df['Tipo de Solicitação'].isin(equipes_selecionadas)]
         
-        # --- ABA 1: VISÃO GERAL ---
+        # --- ABA 1: VISÃO GERAL DO TIME ---
         with aba_time:
             total_geral_time = len(df)
             
@@ -145,7 +145,6 @@ if arquivo_carregado is not None and 'equipes_selecionadas' in locals():
                 taxa_fcr_time = (fcr_unicos_time / total_geral_time) * 100 if total_geral_time > 0 else 0
                 perc_reinc_time = (reincidencias_time / total_geral_time) * 100 if total_geral_time > 0 else 0
                 
-                # Cards de Métricas
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Total Geral (Demandas)", f"{total_geral_time:,}")
                 col2.metric("Reincidências", f"{reincidencias_time:,}", f"{perc_reinc_time:.1f}% do fluxo", delta_color="inverse")
@@ -154,7 +153,6 @@ if arquivo_carregado is not None and 'equipes_selecionadas' in locals():
                 
                 st.markdown("<br>", unsafe_allow_html=True)
                 
-                # Gráfico Premium com Plotly
                 resumo_grafico = df_fcr_time.groupby('Tipo de Solicitação').agg(
                     Total=('Solicitante', 'count'),
                     Unicos=('Solicitante', 'nunique')
@@ -162,31 +160,16 @@ if arquivo_carregado is not None and 'equipes_selecionadas' in locals():
                 resumo_grafico['Reincidências'] = resumo_grafico['Total'] - resumo_grafico['Unicos']
                 resumo_grafico.rename(columns={'Unicos': 'Solucionados (FCR)'}, inplace=True)
                 
-                # Preparar dados para o Plotly Express
                 df_melted = resumo_grafico.melt(id_vars=['Tipo de Solicitação'], value_vars=['Solucionados (FCR)', 'Reincidências'], 
                                                 var_name='Status', value_name='Quantidade')
                 
                 fig = px.bar(
-                    df_melted, 
-                    y='Tipo de Solicitação', 
-                    x='Quantidade', 
-                    color='Status',
-                    orientation='h',
-                    barmode='stack',
+                    df_melted, y='Tipo de Solicitação', x='Quantidade', color='Status',
+                    orientation='h', barmode='stack',
                     color_discrete_map={'Solucionados (FCR)': '#10b981', 'Reincidências': '#64748b'},
                     title="<b>Volume de Atendimentos: FCR vs Reincidências por Equipe</b>"
                 )
-                
-                fig.update_layout(
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    xaxis_title="Número de Solicitações",
-                    yaxis_title="",
-                    legend_title="",
-                    font=dict(size=14, color="#334155"),
-                    hovermode="y unified"
-                )
-                
+                fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', xaxis_title="", yaxis_title="", hovermode="y unified")
                 st.plotly_chart(fig, use_container_width=True)
                 
             else:
@@ -208,16 +191,12 @@ if arquivo_carregado is not None and 'equipes_selecionadas' in locals():
                 taxa_op = (unicos_op / total_op) * 100 if total_op > 0 else 0
                 
                 dados_operadores.append({
-                    'Operador': operador,
-                    'Volume Total': total_op,
-                    'Únicos (FCR)': unicos_op,
-                    'Reincidências': reincidencias_op,
-                    'Taxa FCR (%)': taxa_op # Guardamos como número real para a barra de progresso
+                    'Operador': operador, 'Volume Total': total_op, 'Únicos (FCR)': unicos_op,
+                    'Reincidências': reincidencias_op, 'Taxa FCR (%)': taxa_op
                 })
             
             df_resultado_individual = pd.DataFrame(dados_operadores).sort_values(by='Taxa FCR (%)', ascending=False)
             
-            # Nova Tabela com DataGrid nativo e Barras de Progresso!
             st.dataframe(
                 df_resultado_individual,
                 column_config={
@@ -225,33 +204,99 @@ if arquivo_carregado is not None and 'equipes_selecionadas' in locals():
                     "Volume Total": st.column_config.NumberColumn("📥 Volume Total", format="%d"),
                     "Únicos (FCR)": st.column_config.NumberColumn("✅ Únicos (FCR)", format="%d"),
                     "Reincidências": st.column_config.NumberColumn("🔁 Reincidências", format="%d"),
-                    "Taxa FCR (%)": st.column_config.ProgressColumn(
-                        "🚀 Taxa FCR (%)",
-                        help="Porcentagem de chamados resolvidos no primeiro contato.",
-                        format="%.1f%%",
-                        min_value=0,
-                        max_value=100,
-                    ),
+                    "Taxa FCR (%)": st.column_config.ProgressColumn("🚀 Taxa FCR (%)", format="%.1f%%", min_value=0, max_value=100),
                 },
-                hide_index=True,
-                use_container_width=True
+                hide_index=True, use_container_width=True
             )
-        
-        # --- EXPORTAÇÃO ---
-        st.markdown("---")
-        col_vazia, col_btn = st.columns([3, 1])
-        with col_btn:
-            base_fcr_limpa = df_fcr_time.drop_duplicates(subset=['Solicitante', 'Tipo de Solicitação'])
-            csv_limpo = base_fcr_limpa.to_csv(index=False, sep=';', encoding='utf-8-sig')
             
-            st.download_button(
-                label="📥 Exportar Base Limpa (CSV)",
-                data=csv_limpo,
-                file_name="Base_FCR_Time_Filtrado.csv",
-                mime="text/csv",
-                use_container_width=True,
-                type="primary"
-            )
+        # --- ABA 3: CONTROLE VOALLE vs ERA ---
+        with aba_voalle:
+            st.markdown("### 📝 Auditoria de Registros: Voalle vs ERA (Omnichannel)")
+            st.info("💡 **Como funciona:** O Voalle é lido do CSV, ignorando os status 'Cancelado' e aplicando a regra de FCR (Únicos). Digite o volume do Omnichannel na coluna **'Atendimentos ERA'** e aperte `Enter` para ver a Aderência.")
+            
+            if 'Status' in df_fcr_time.columns:
+                df_voalle_base = df_fcr_time[~df_fcr_time['Status'].astype(str).str.upper().str.contains('CANCELADO', na=False)]
+            else:
+                df_voalle_base = df_fcr_time
+            
+            dados_voalle = []
+            if not df_voalle_base.empty:
+                for operador in df_voalle_base[coluna_atendente].unique():
+                    df_op = df_voalle_base[df_voalle_base[coluna_atendente] == operador]
+                    unicos_voalle = df_op['Solicitante'].nunique()
+                    dados_voalle.append({coluna_atendente: operador, 'Registros Voalle (FCR Válidos)': unicos_voalle})
+            
+            df_voalle_agrupado = pd.DataFrame(dados_voalle)
+            
+            if df_voalle_agrupado.empty:
+                st.warning("Não há registros válidos para o Voalle com os filtros atuais.")
+            else:
+                if 'era_inputs' not in st.session_state:
+                    st.session_state.era_inputs = {}
+                    
+                df_voalle_agrupado['Atendimentos ERA'] = df_voalle_agrupado[coluna_atendente].map(lambda x: st.session_state.era_inputs.get(x, 0))
+                
+                # --- BLOCO BLINDADO DEFINITIVO ---
+                widget_key = "era_editor"
+                if widget_key in st.session_state:
+                    edits = st.session_state[widget_key].get("edited_rows", {})
+                    for row_idx_str, edit_dict in edits.items():
+                        if "Atendimentos ERA" in edit_dict:
+                            novo_valor = edit_dict["Atendimentos ERA"]
+                            if novo_valor is None:
+                                novo_valor = 0
+                            
+                            try:
+                                # Tenta ler como número da linha
+                                row_idx = int(row_idx_str)
+                                atendente = df_voalle_agrupado.iloc[row_idx][coluna_atendente]
+                            except ValueError:
+                                # Se quebrar, assume que o Streamlit mandou o nome direto!
+                                atendente = row_idx_str
+                            except IndexError:
+                                continue # Trava extra de segurança
+
+                            # Salva na memória e atualiza a tabela buscando pelo nome exato do atendente
+                            st.session_state.era_inputs[atendente] = novo_valor
+                            mask_atendente = df_voalle_agrupado[coluna_atendente] == atendente
+                            df_voalle_agrupado.loc[mask_atendente, 'Atendimentos ERA'] = novo_valor
+
+                df_voalle_agrupado['Atendimentos ERA'] = pd.to_numeric(df_voalle_agrupado['Atendimentos ERA']).fillna(0)
+                df_voalle_agrupado['Registros Voalle (FCR Válidos)'] = pd.to_numeric(df_voalle_agrupado['Registros Voalle (FCR Válidos)']).fillna(0)
+
+                df_voalle_agrupado['Aderência (%)'] = 0.0
+                mask_positivo = df_voalle_agrupado['Atendimentos ERA'] > 0
+                
+                if mask_positivo.any():
+                    df_voalle_agrupado.loc[mask_positivo, 'Aderência (%)'] = (
+                        df_voalle_agrupado.loc[mask_positivo, 'Registros Voalle (FCR Válidos)'] / 
+                        df_voalle_agrupado.loc[mask_positivo, 'Atendimentos ERA']
+                    ) * 100
+                
+                df_voalle_agrupado.loc[df_voalle_agrupado['Aderência (%)'] > 100, 'Aderência (%)'] = 100.0
+                
+                tabela_voalle = st.data_editor(
+                    df_voalle_agrupado,
+                    column_config={
+                        coluna_atendente: st.column_config.TextColumn("👤 Nome do Atendente", disabled=True, width="medium"),
+                        "Registros Voalle (FCR Válidos)": st.column_config.NumberColumn("✅ Registros Voalle", disabled=True),
+                        "Atendimentos ERA": st.column_config.NumberColumn("✏️ Atendimentos ERA (Digite)", min_value=0, step=1),
+                        "Aderência (%)": st.column_config.ProgressColumn("📈 Aderência (%)", format="%.2f%%", min_value=0, max_value=100, disabled=True)
+                    },
+                    hide_index=True,
+                    use_container_width=True,
+                    key=widget_key
+                )
+                
+                st.markdown("---")
+                total_voalle = tabela_voalle['Registros Voalle (FCR Válidos)'].sum()
+                total_era = tabela_voalle['Atendimentos ERA'].sum()
+                taxa_geral_aderencia = (total_voalle / total_era) * 100 if total_era > 0 else 0
+
+                col_v1, col_v2, col_v3, col_v4 = st.columns(4)
+                col_v1.metric("Total Voalle (Extraído)", int(total_voalle))
+                col_v2.metric("Total ERA (Digitado)", int(total_era))
+                col_v3.metric("Aderência Global do Time", f"{taxa_geral_aderencia:.2f}%")
 
 elif arquivo_carregado is None:
     st.info("👈 Faça o upload do arquivo CSV no menu lateral para iniciar a análise dos dados.")
