@@ -281,7 +281,12 @@ if arquivo_carregado is not None and 'equipes_selecionadas' in locals():
                         coluna_atendente: st.column_config.TextColumn("👤 Nome do Atendente", disabled=True, width="medium"),
                         "Registros Voalle (FCR Válidos)": st.column_config.NumberColumn("✅ Registros Voalle", disabled=True),
                         "Atendimentos ERA": st.column_config.NumberColumn("✏️ Atendimentos ERA (Digite)", min_value=0, step=1),
-                        "Aderência (%)": st.column_config.ProgressColumn("📈 Aderência (%)", format="%.2f%%", min_value=0, max_value=100, disabled=True)
+                        "Aderência (%)": st.column_config.ProgressColumn(
+    "📈 Aderência (%)",
+    format="%.2f%%",
+    min_value=0,
+    max_value=100
+)
                     },
                     hide_index=True,
                     use_container_width=True,
