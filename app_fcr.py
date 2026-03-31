@@ -70,6 +70,7 @@ with st.sidebar:
                 arquivo_carregado.seek(0)
                 df = pd.read_csv(arquivo_carregado, sep=';', encoding='latin1')
             
+            # Limpeza básica
             df['Tipo de Solicitação'] = df['Tipo de Solicitação'].astype(str).str.strip()
             df['Solicitante'] = df['Solicitante'].astype(str).str.strip()
             
@@ -77,6 +78,7 @@ with st.sidebar:
             if coluna_atendente in df.columns:
                 df[coluna_atendente] = df[coluna_atendente].astype(str).str.strip()
             
+            # Tratamento de Datas
             if 'Data da Abertura' in df.columns:
                 df['Data da Abertura'] = df['Data da Abertura'].astype(str).str.strip()
                 df['Data da Abertura'] = pd.to_datetime(df['Data da Abertura'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
@@ -93,7 +95,7 @@ with st.sidebar:
                     
                     mask = (df['Data da Abertura'].dt.date >= data_inicio) & (df['Data da Abertura'].dt.date <= data_fim)
                     df = df.loc[mask]
-                
+            
             st.markdown("### 🏢 Equipes FCR")
             equipes_disponiveis = df['Tipo de Solicitação'].unique().tolist()
             equipes_padrao_presentes = [e for e in EQUIPES_FCR if e in equipes_disponiveis]
@@ -132,9 +134,10 @@ if arquivo_carregado is not None and 'equipes_selecionadas' in locals():
             "📝 REGISTROS: VOALLE vs ERA"
         ])
         
+        # DataFrame específico para as equipes que entram no cálculo de FCR
         df_fcr_time = df[df['Tipo de Solicitação'].isin(equipes_selecionadas)]
         
-        # --- ABA 1: VISÃO GERAL DO TIME ---
+        # --- ABA 1: VISÃO GERAL DO TIME (Regra FCR: Clientes Únicos) ---
         with aba_time:
             total_geral_time = len(df)
             
@@ -171,11 +174,10 @@ if arquivo_carregado is not None and 'equipes_selecionadas' in locals():
                 )
                 fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', xaxis_title="", yaxis_title="", hovermode="y unified")
                 st.plotly_chart(fig, use_container_width=True)
-                
             else:
                 st.info("Nenhum chamado das equipes de FCR atende aos filtros atuais.")
         
-        # --- ABA 2: RESULTADO INDIVIDUAL ---
+        # --- ABA 2: RESULTADO INDIVIDUAL (Regra FCR: Clientes Únicos) ---
         with aba_individual:
             st.markdown("### 🏆 Ranking de Performance por Operador")
             
@@ -209,11 +211,12 @@ if arquivo_carregado is not None and 'equipes_selecionadas' in locals():
                 hide_index=True, use_container_width=True
             )
             
-        # --- ABA 3: CONTROLE VOALLE vs ERA ---
+        # --- ABA 3: CONTROLE VOALLE vs ERA (Regra Auditoria: Volume Total) ---
         with aba_voalle:
             st.markdown("### 📝 Auditoria de Registros: Voalle vs ERA (Omnichannel)")
-            st.info("💡 **Como funciona:** O Voalle é lido do CSV, ignorando os status 'Cancelado' e aplicando a regra de FCR (Únicos). Digite o volume do Omnichannel na coluna **'Atendimentos ERA'** e aperte `Enter` para ver a Aderência.")
+            st.info("💡 **Regra de Auditoria:** Nesta aba o cálculo considera o **TOTAL de protocolos registrados**, independente de ser o mesmo cliente, para comparar com o volume do ERA.")
             
+            # Filtro de cancelados para não contar registros "inválidos" na auditoria
             if 'Status' in df_fcr_time.columns:
                 df_voalle_base = df_fcr_time[~df_fcr_time['Status'].astype(str).str.upper().str.contains('CANCELADO', na=False)]
             else:
@@ -223,8 +226,9 @@ if arquivo_carregado is not None and 'equipes_selecionadas' in locals():
             if not df_voalle_base.empty:
                 for operador in df_voalle_base[coluna_atendente].unique():
                     df_op = df_voalle_base[df_voalle_base[coluna_atendente] == operador]
-                    unicos_voalle = df_op['Solicitante'].nunique()
-                    dados_voalle.append({coluna_atendente: operador, 'Registros Voalle (FCR Válidos)': unicos_voalle})
+                    # ALTERADO: Agora usamos .count() em vez de .nunique()
+                    total_registros_voalle = df_op['Solicitante'].count() 
+                    dados_voalle.append({coluna_atendente: operador, 'Registros Voalle (Total)': total_registros_voalle})
             
             df_voalle_agrupado = pd.DataFrame(dados_voalle)
             
@@ -233,75 +237,59 @@ if arquivo_carregado is not None and 'equipes_selecionadas' in locals():
             else:
                 if 'era_inputs' not in st.session_state:
                     st.session_state.era_inputs = {}
-                    
+                
+                # Mapeia inputs salvos anteriormente
                 df_voalle_agrupado['Atendimentos ERA'] = df_voalle_agrupado[coluna_atendente].map(lambda x: st.session_state.era_inputs.get(x, 0))
                 
-                # --- BLOCO BLINDADO DEFINITIVO ---
+                # Gerenciamento de Edição da Tabela
                 widget_key = "era_editor"
                 if widget_key in st.session_state:
                     edits = st.session_state[widget_key].get("edited_rows", {})
                     for row_idx_str, edit_dict in edits.items():
                         if "Atendimentos ERA" in edit_dict:
-                            novo_valor = edit_dict["Atendimentos ERA"]
-                            if novo_valor is None:
-                                novo_valor = 0
-                            
+                            novo_valor = edit_dict["Atendimentos ERA"] or 0
                             try:
-                                # Tenta ler como número da linha
                                 row_idx = int(row_idx_str)
                                 atendente = df_voalle_agrupado.iloc[row_idx][coluna_atendente]
-                            except ValueError:
-                                # Se quebrar, assume que o Streamlit mandou o nome direto!
-                                atendente = row_idx_str
-                            except IndexError:
-                                continue # Trava extra de segurança
-
-                            # Salva na memória e atualiza a tabela buscando pelo nome exato do atendente
-                            st.session_state.era_inputs[atendente] = novo_valor
-                            mask_atendente = df_voalle_agrupado[coluna_atendente] == atendente
-                            df_voalle_agrupado.loc[mask_atendente, 'Atendimentos ERA'] = novo_valor
+                                st.session_state.era_inputs[atendente] = novo_valor
+                                df_voalle_agrupado.loc[df_voalle_agrupado[coluna_atendente] == atendente, 'Atendimentos ERA'] = novo_valor
+                            except:
+                                continue
 
                 df_voalle_agrupado['Atendimentos ERA'] = pd.to_numeric(df_voalle_agrupado['Atendimentos ERA']).fillna(0)
-                df_voalle_agrupado['Registros Voalle (FCR Válidos)'] = pd.to_numeric(df_voalle_agrupado['Registros Voalle (FCR Válidos)']).fillna(0)
+                df_voalle_agrupado['Registros Voalle (Total)'] = pd.to_numeric(df_voalle_agrupado['Registros Voalle (Total)']).fillna(0)
 
+                # Cálculo de Aderência
                 df_voalle_agrupado['Aderência (%)'] = 0.0
-                mask_positivo = df_voalle_agrupado['Atendimentos ERA'] > 0
+                mask_aderencia = df_voalle_agrupado['Atendimentos ERA'] > 0
+                df_voalle_agrupado.loc[mask_aderencia, 'Aderência (%)'] = (
+                    df_voalle_agrupado.loc[mask_aderencia, 'Registros Voalle (Total)'] / 
+                    df_voalle_agrupado.loc[mask_aderencia, 'Atendimentos ERA']
+                ) * 100
                 
-                if mask_positivo.any():
-                    df_voalle_agrupado.loc[mask_positivo, 'Aderência (%)'] = (
-                        df_voalle_agrupado.loc[mask_positivo, 'Registros Voalle (FCR Válidos)'] / 
-                        df_voalle_agrupado.loc[mask_positivo, 'Atendimentos ERA']
-                    ) * 100
-                
+                # Trava em 100% (caso haja mais registros no Voalle que no ERA)
                 df_voalle_agrupado.loc[df_voalle_agrupado['Aderência (%)'] > 100, 'Aderência (%)'] = 100.0
                 
                 tabela_voalle = st.data_editor(
                     df_voalle_agrupado,
                     column_config={
                         coluna_atendente: st.column_config.TextColumn("👤 Nome do Atendente", disabled=True, width="medium"),
-                        "Registros Voalle (FCR Válidos)": st.column_config.NumberColumn("✅ Registros Voalle", disabled=True),
+                        "Registros Voalle (Total)": st.column_config.NumberColumn("✅ Total Voalle", disabled=True),
                         "Atendimentos ERA": st.column_config.NumberColumn("✏️ Atendimentos ERA (Digite)", min_value=0, step=1),
-                        "Aderência (%)": st.column_config.ProgressColumn(
-    "📈 Aderência (%)",
-    format="%.2f%%",
-    min_value=0,
-    max_value=100
-)
+                        "Aderência (%)": st.column_config.ProgressColumn("📈 Aderência (%)", format="%.2f%%", min_value=0, max_value=100)
                     },
-                    hide_index=True,
-                    use_container_width=True,
-                    key=widget_key
+                    hide_index=True, use_container_width=True, key=widget_key
                 )
                 
                 st.markdown("---")
-                total_voalle = tabela_voalle['Registros Voalle (FCR Válidos)'].sum()
-                total_era = tabela_voalle['Atendimentos ERA'].sum()
-                taxa_geral_aderencia = (total_voalle / total_era) * 100 if total_era > 0 else 0
+                total_v = tabela_voalle['Registros Voalle (Total)'].sum()
+                total_e = tabela_voalle['Atendimentos ERA'].sum()
+                taxa_aderencia = (total_v / total_e) * 100 if total_e > 0 else 0
 
-                col_v1, col_v2, col_v3, col_v4 = st.columns(4)
-                col_v1.metric("Total Voalle (Extraído)", int(total_voalle))
-                col_v2.metric("Total ERA (Digitado)", int(total_era))
-                col_v3.metric("Aderência Global do Time", f"{taxa_geral_aderencia:.2f}%")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Total Voalle (Período)", int(total_v))
+                c2.metric("Total ERA (Digitado)", int(total_e))
+                c3.metric("Aderência Global", f"{taxa_aderencia:.2f}%")
 
 elif arquivo_carregado is None:
     st.info("👈 Faça o upload do arquivo CSV no menu lateral para iniciar a análise dos dados.")
